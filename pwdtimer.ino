@@ -22,9 +22,9 @@
 /*-----------------------------------------*
   - TIMER CONFIGURATION -
  *-----------------------------------------*/
-#define NUM_LANES    1                 // number of lanes
+#define NUM_LANES    4                 // number of lanes
 
-//#define LED_DISPLAY  1                 // Enable lane place/time displays
+#define LED_DISPLAY  1                 // Enable lane place/time displays
 //#define DUAL_DISP    1                 // dual displays (front/back) per lane (4 lanes max)
 //#define LARGE_DISP   1                 // utilize large Adafruit displays (see website)
 #define SHOW_PLACE   1                 // Show place mode
@@ -33,6 +33,8 @@
 #define MAX_BRIGHT   15                // maximum display brightness (0-15)
 
 #define GATE_RESET   0                 // Enable closing start gate to reset timer
+#define BACKWARD_LED 1                 // some status LEDs have swapped pins
+
 /*-----------------------------------------*
   - END -
  *-----------------------------------------*/
@@ -48,8 +50,8 @@
   - static definitions -
  *-----------------------------------------*/
 #define PDT_VERSION  "3.00"            // software version
-#define MAX_LANE     6                 // maximum number of lanes (Uno)
-#define MAX_DISP     8                 // maximum number of displays (Adafruit)
+#define MAX_LANE     6                 // maximum number of lanes (Uno) //mtl
+#define MAX_DISP     4                 // maximum number of displays (Adafruit)
 
 #define mREADY       0                 // program modes
 #define mRACING      1
@@ -61,8 +63,14 @@
 #define NUM_DIGIT    4                 // timer resolution (# of decimals)
 #define DISP_DIGIT   4                 // total number of display digits
 
-#define PWM_LED_ON   220
-#define PWM_LED_OFF  255
+// rgb colors. 255 is off, values less than 255 are brighter. 0 is maximum brightness, but 220 is the recommended maximum brightness
+// rgb order
+int PWM_BLK[3] = {255, 255, 255};
+int PWM_RED[3] = {220, 255, 255};
+int PWM_GRN[3] = {255, 220, 255};
+int PWM_BLU[3] = {255, 255, 220};
+int PWM_YEL[3] = {240, 220, 255};
+
 #define char2int(c) (c - '0') 
 
 //
@@ -96,14 +104,20 @@
  *-----------------------------------------*/
 byte BRIGHT_LEV   = A0;                // brightness level
 byte RESET_SWITCH =  8;                // reset switch
+#ifdef BACKWARD_LED
+byte STATUS_LED_R =  9;                // status LED (red)
+byte STATUS_LED_G = 10;                // status LED (green)
+byte STATUS_LED_B = 11;                // status LED (blue)
+#else
 byte STATUS_LED_R =  9;                // status LED (red)
 byte STATUS_LED_B = 10;                // status LED (blue)
 byte STATUS_LED_G = 11;                // status LED (green)
+#endif
 byte START_GATE   = 12;                // start gate switch
 byte START_SOL    = 13;                // start solenoid
 
 //                Display #    1     2     3     4     5     6     7     8
-int  DISP_ADD [MAX_DISP] = {0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77};    // display I2C addresses
+int  DISP_ADD [MAX_DISP] = {0x70, 0x71, 0x72, 0x73}; // 0x74, 0x75, 0x76, 0x77};    // display I2C addresses
 
 //                   Lane #    1     2     3     4     5     6
 byte LANE_DET [MAX_LANE] = {   2,    3,    4,    5,    6,    7};                // finish detection pins
@@ -154,6 +168,17 @@ void smsg_str(const char * msg, boolean crlf=true);
  *================================================================================*/
 void setup()
 {  
+  Serial.begin(9600);
+
+  // mtl was here
+  while (!Serial) {
+    ; // wait for serial port to connect. Needed for native USB port only
+  }
+  delay(100);
+  Serial.println("setup started");
+
+  // mtl done
+  
 /*-----------------------------------------*
   - hardware setup -
  *-----------------------------------------*/
@@ -170,16 +195,31 @@ void setup()
 
   digitalWrite(START_SOL, LOW);
 
+  analogWrite(STATUS_LED_R,  0); // start dark
+  analogWrite(STATUS_LED_B,  0);
+  analogWrite(STATUS_LED_G,  0);
+
+  Serial.println("pins configured");
+
 #ifdef LED_DISPLAY
   for (int n=0; n<MAX_DISP; n++)
   {
+    Serial.print(n);
+    Serial.println(" configuring display 1");
     disp_mat[n] = Adafruit_7segment();
+    Serial.println(" configuring display 2");
     disp_mat[n].begin(DISP_ADD[n]);
+    Serial.println(" configuring display 3");
     disp_mat[n].clear();
+    Serial.println(" configuring display 4");
     disp_mat[n].drawColon(false);
+    Serial.println(" configuring display 5");
     disp_mat[n].writeDisplay();
+    Serial.println(" configuring display 6");
   }
 #endif
+
+  Serial.println("led configured");
 
   for (int n=0; n<MAX_LANE; n++)
   {
@@ -188,18 +228,20 @@ void setup()
     digitalWrite(LANE_DET[n], HIGH);   // enable pull-up resistor
   }
   set_display_brightness();
+  Serial.println("brightness set");
 
 /*-----------------------------------------*
   - software setup -
  *-----------------------------------------*/
-  Serial.begin(9600);
   smsg(SMSG_POWER);
+  Serial.println("SMSG_POWER");
 
 /*-----------------------------------------*
   - check for test mode -
  *-----------------------------------------*/
   if (digitalRead(RESET_SWITCH) == LOW)
   {
+    Serial.println("testmode");
     mode = mTEST;
     test_pdt_hw();
   }
@@ -209,6 +251,7 @@ void setup()
  *-----------------------------------------*/
   initialize(true);
   unmask_all_lanes();
+  Serial.println("setup() done");
 }
 
 
@@ -454,8 +497,20 @@ void test_pdt_hw()
 
 
   smsg_str("TEST MODE");
+  
+  mode = mREADY;         // blue
   set_status_led();
   delay(2000); 
+  mode = mRACING;  // green
+  set_status_led();
+  delay(2000); 
+  mode = mFINISH;  // red
+  set_status_led();
+  delay(2000); 
+  mode = mTEST;    // yellow
+  set_status_led();
+  delay(2000); 
+
 
 /*-----------------------------------------*
    show status of lane detectors
@@ -801,35 +856,33 @@ void set_display_brightness()
  *================================================================================*/
 void set_status_led()
 {
-  int r_lev, b_lev, g_lev;
-
   dbg(fDebug, "status led = ", mode);
 
-  r_lev = PWM_LED_OFF;
-  b_lev = PWM_LED_OFF;
-  g_lev = PWM_LED_OFF;
-
+  int* rgb;
   if (mode == mREADY)         // blue
   {
-    b_lev = PWM_LED_ON;
+    rgb = PWM_BLU;
   }
   else if (mode == mRACING)  // green
   {
-    g_lev = PWM_LED_ON;
+    rgb = PWM_GRN;
   }
   else if (mode == mFINISH)  // red
   {
-    r_lev = PWM_LED_ON;
+    rgb = PWM_RED;
   }
   else if (mode == mTEST)    // yellow
   {
-    r_lev = PWM_LED_ON;
-    g_lev = PWM_LED_ON;
+    rgb = PWM_YEL;
+  }
+  else
+  {
+    rgb = PWM_BLK;
   }
 
-  analogWrite(STATUS_LED_R,  r_lev);
-  analogWrite(STATUS_LED_B,  b_lev);
-  analogWrite(STATUS_LED_G,  g_lev);
+  analogWrite(STATUS_LED_R,  rgb[0]);
+  analogWrite(STATUS_LED_G,  rgb[1]);
+  analogWrite(STATUS_LED_B,  rgb[2]);
 
   return;
 }
